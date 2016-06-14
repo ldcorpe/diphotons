@@ -9,6 +9,8 @@ import fnmatch
 from copy import deepcopy as copy
 import re
 import ROOT as r
+from array import array
+
 
 r.gROOT.ProcessLine(".L $CMSSW_BASE/lib/$SCRAM_ARCH/libHiggsAnalysisCombinedLimit.so")
 r.gROOT.ProcessLine(".L $CMSSW_BASE/lib/$SCRAM_ARCH/libdiphotonsUtils.so")
@@ -73,16 +75,18 @@ parser = OptionParser()
 parser.add_option("-i","--infile",help="Signal Workspace")
 parser.add_option("-d","--datfile",help="dat file")
 parser.add_option("-s","--systdatfile",help="systematics dat file")
+parser.add_option("--nEvents",default="801:1479",help="how many events in EBEE:EBEB")
 parser.add_option("--mhLow",default="120",help="mh Low")
 parser.add_option("--mhHigh",default="130",help="mh High")
 parser.add_option("--mh",default="750",help="mh")
 parser.add_option("-k",default=None,help="with of signal")
 parser.add_option("-q","--queue",help="Which batch queue")
 parser.add_option("--runLocal",default=False,action="store_true",help="Run locally")
+parser.add_option("--drawCorrected",default=False,action="store_true",help="Apply stupid correction")
 parser.add_option("--useMCBkgShape",default=False,action="store_true",help="Use MC rooHistPdf as bkg shape instead")
 parser.add_option("--parametric",default=True,action="store_true",help="submit parameteric jobs")
 parser.add_option("--batch",default="LSF",help="Which batch system to use (LSF,IC)")
-parser.add_option("--changeIntLumi",default="1.")
+parser.add_option("--lumi",default="10.0")
 parser.add_option("-o","--outfilename",default=None)
 parser.add_option("-p","--outDir",default="./")
 parser.add_option("--hadd",default=None)
@@ -106,7 +110,60 @@ def system(exec_line):
   #if opts.verbose: print '\t', exec_line
   os.system(exec_line)
 
-def writePreamble(sub_file,mu,cat,truthPdf,fitPdf,index):
+
+def getExoBSResults():
+  f = r.TFile("profile_pull-3.root")
+  c = f.Get("profile_pull")
+  tGraphsArray={}
+  names=["EBEB","EBEE"]
+  colours=[r.kRed,r.kBlue]
+  counter=0
+  for item in c.GetListOfPrimitives():
+    if (item.InheritsFrom("TGraph")):
+      #print "minimum ", item.GetMinimum()
+      #item.Print()
+      tGraphsArray[names[counter]]=item.Clone(names[counter])
+      counter=counter+1
+  f.Close()
+  return tGraphsArray
+
+def getBScorrectionFactors(dijetNew, dijetOld ):
+  correctionsArray={}
+  print "DEBUG A"
+  dijetOld.Print()
+  print "DEBUG B"
+  dijetNew.Print()
+  for i in range(dijetNew.GetN()):
+    minDist=9999
+    XvalNew=dijetNew.GetX()[i]
+    YvalNew=dijetNew.GetY()[i]
+    correctionsArray[XvalNew]=9999
+    for j in range(dijetOld.GetN()):
+      XvalOld=dijetOld.GetX()[j]
+      YvalOld=dijetOld.GetY()[j]
+      print "new entry ", i, " at ", XvalNew ," : old entry ", j," at ", XvalOld ," distance ", abs(XvalNew-XvalOld), " min dist ", minDist  
+      if abs(XvalNew-XvalOld) < minDist:
+        print " --> found new closest point ! YValNew ", YvalNew, " YvalOld ", YvalOld
+        minDist= abs(XvalNew-XvalOld)
+        if float(YvalNew)==0 : 
+          print "error, Yval New is 0"
+          exit(1) 
+          #correctionsArray[XvalNew]=0
+        else :correctionsArray[XvalNew] = float(YvalOld)/float(YvalNew)
+  print "DEBUG LC this is my correction array:"
+  print correctionsArray
+  return correctionsArray
+
+def applyCorrections(tgraph, correctionArray):
+  tgraphCorr = r.TGraphErrors()
+  for i in range(tgraph.GetN()):
+    xval= tgraph.GetX()[i]
+    yval= tgraph.GetY()[i]
+    tgraphCorr.SetPoint(i,xval,yval*correctionArray[xval])
+    #tgraphCorr.SetPointError(i,xval,yval*correctionArray[xval])
+  return tgraphCorr
+
+def writePreamble(sub_file,mu,mh,cat,truthPdf,fitPdf,index):
   #print "[INFO] writing preamble"
   sub_file.write('#!/bin/bash\n')
   sub_file.write('touch %s.run\n'%os.path.abspath(sub_file.name))
@@ -118,7 +175,12 @@ def writePreamble(sub_file,mu,cat,truthPdf,fitPdf,index):
   #sub_file.write('cd scratch_$number\n')
   sub_file.write('MU=%.2f \n'%mu)
   sub_file.write('MHhat=%d \n'%opts.mh)
-  sub_file.write('NTOYS=500 \n')
+  sub_file.write('NTOYS=200 \n')
+  
+  if (mh>1500):
+    sub_file.write('MINR=-1 \n')
+  else:
+    sub_file.write('MINR=-60 \n')
   sub_file.write('PDF=%d \n'%truthPdf)
   sub_file.write('FITPDF=%d \n'%fitPdf)
   sub_file.write('EXTRAOPT="-L libdiphotonsUtils"\n')
@@ -146,17 +208,19 @@ def writePostamble(sub_file):
   sub_file.close()
   system('chmod +x %s'%os.path.abspath(sub_file.name))
   if opts.queue:
+    print "DEBUG opts.queue ", opts.queue
     system('rm -f %s.done'%os.path.abspath(sub_file.name))
     system('rm -f %s.*fail'%os.path.abspath(sub_file.name))
     system('rm -f %s.log'%os.path.abspath(sub_file.name))
     system('rm -f %s.err'%os.path.abspath(sub_file.name))
     if (opts.batch == "LSF") : system('bsub -q %s -o %s.log %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
     if (opts.batch == "IC") : 
-      if (opts.parametric):
-        system('qsub -q %s -o %s.log -e %s.err -t 1-10:1 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
-        print "system(",'qsub -q %s -o %s.log -e %s.err %s '%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)),")"
-      else:
-        system('qsub -q %s -o %s.log -e %s.err %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
+        print "DEBUG opts.batch ", opts.batch
+        if (opts.parametric):
+          system('qsub -q %s -o %s.log -e %s.err -t 1-3:1 -tc 1 -l h_rt=2:55:0 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
+          print  "system(",'qsub -q %s -o %s.log -e %s.err -t 1-3:1 -tc 1 -l h_rt=2:55:0 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name))
+        else:
+           system('qsub -q %s -o %s.log -e %s.err -l h_rt=2:55:0  %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
   if opts.runLocal:
      system('bash %s'%os.path.abspath(sub_file.name))
 
@@ -228,12 +292,15 @@ def trawlResubmit():
   list_of_files=[]
   for root, dirs, files in os.walk(opts.resubmit):
     for x in files:
-      if '.sh.run' in x: 
+      if '.sh.fail' in x: 
         print "adding", root+"/"+x.split(".fail")[0] 
         list_of_files.append(root+"/"+x.split(".fail")[0])
+      if '.sh.run' in x: 
+        print "adding", root+"/"+x.split(".run")[0] 
+        list_of_files.append(root+"/"+x.split(".run")[0])
   for f in list_of_files:
     #print f
-    f = f.replace(".run","")
+    f = f.replace(".run","").replace(".fail","")
     index = f.split("sub")[1].split(".")[0]
     if (index==""): continue
     #print "index is ", int(index)
@@ -244,8 +311,8 @@ def trawlResubmit():
     for line in job0.readlines():
       if "$SGE_TASK_ID" in line:
         job.write(line.replace("$SGE_TASK_ID","%d"%int(index)))
-      elif "NTOYS=750" in line:
-        job.write(line.replace("NTOYS=750","NTOYS=500"))
+      elif "NTOYS=200" in line:
+        job.write(line.replace("NTOYS=200","NTOYS=100"))
       else :
         job.write(line)
     print "resubmitting", job
@@ -284,29 +351,56 @@ def getAveragePullNew(f,muTrue,pdfTrue,pdfFit,tag):
   #ttree.Draw("(mu-%f)/muHiErr>>htemp(10,-4,4)"%muTrue)
   print 'ttree.Draw("(mu-%f)/muHiErr>>htemp"'%muTrue,')'
   #ttree.Draw("(mu-%f)/muErr>>htemp"%muTrue)
-  ttree.Draw("(mu-%f)/muHiErr>>htemp"%muTrue,"mu>-20 ")
-  c.SaveAs("test.pdf")
+  ttree.Draw("(mu-%f)/muErr>>htemp(500,-10,10)"%muTrue,"fit_status>0 ")
+  #ttree.Draw("(mu-%f)>>htemp"%muTrue,"mu>-20 ")
   #exit(1)
   #ttree.Draw("(mu)/muErr>>htemp(10,-4,4)")
   htemp = r.gROOT.FindObject("htemp")
-  print htemp.GetEntries()
+  norm  = 1/float(htemp.GetEntries())
+  print " DEBUG norm ", norm
+  #ttree.Draw("(mu-%f)>>htemp2"%muTrue,"(mu>-20) *%d"%norm)
   print "fitting"
   #htemp.Fit("gaus","")
+  htemp.DrawNormalized()
+  r.gStyle.SetOptStat(1111)
+  r.gStyle.SetOptFit(111)
   htemp.Fit("gaus","q")
   print htemp
   fit = htemp.GetFunction("gaus")
   print fit
   pullLists={}
-  if not (htemp.GetEntries()) : return pullLists
-  pull = fit.GetParameter(1)
+  #if (htemp.GetEntries() <100 ) : return pullLists
+  if (htemp.GetEntries() <1 ) : return pullLists
+  gausmean = fit.GetParameter(1)
+  #xq = [0.5]
+  #xq = r.vector(float)(1)
+  #yq = r.vector(float)(1)
+  xq = array('d',[ -999. ])
+  yq = array('d',[ -999. ])
+  xq[0] =0.5001
+  yq[0] = -999
+  pull = htemp.GetQuantiles(1,yq,xq)
+  print "QUANTILES (MEDIAN) yq", yq
+  pull= yq[0]
+  arr = r.TArrow(pull,-1,pull,0,0.05,"|>")
+  arr.Draw()
+  tlat = r.TLatex()
+  tlat.SetNDC()
+  tlat.DrawLatex(0.1,0.05,"median %s"%(pull))
+  tlat.SetTextAlign(22)
+  c.SaveAs("histo_%s.pdf"%f.split("/")[1])
+  c.SaveAs("histo_%s.png"%f.split("/")[1])
   #pull = htemp.GetMean()
   print pull
-  print " DEBUGXXX] file ", f, " mean is ",pull
+  print " DEBUGXXX] file ", f, " median is ",pull, " gaus mean is ",  gausmean
+  if pull==0.0 : 
+    print "ERROR pull is identically zero!"
+    exit(1)
   if not pdfFit in pullLists.keys(): pullLists[pdfFit]=None
   pullLists[pdfFit]=pull
   tf.Close()
   wf=open("log.txt","a")
-  wf.write("%s %.2f \n"%(f,pull))
+  wf.write("%s mean %.2f meadian %.2f \n"%(f,gausmean,pull))
   wf.close()
 
   #for pdf in pullLists.keys():
@@ -448,6 +542,7 @@ def makePlotsDeltaL():
 
 def makePlotsPulls():
   list_of_graphs={}
+  pull_vs_mX_graphs={}
   wf=open("log.txt","w")
   wf.close()
   list_of_files=[]
@@ -466,16 +561,28 @@ def makePlotsPulls():
     #r.gStyle.SetOptStat(0)
     tagName = fshort.split("_mu")[0].replace("_13TeV","")
     mu = float(fshort.split("mu_")[1].split("_")[0])
-    mh = float(fshort.split("mh_")[1].split("_")[0])
+    mX = float(fshort.split("mh_")[1].split("_")[0])
     kval = (fshort.split("k_")[1].split("_")[0])
     truthPdf = int(fshort.split("truthPdf_")[1].split("_")[0])
     fitPdf = int(fshort.split("fitPdf_")[1].split("_")[0])
-    label="%s_mX_%d_k_%s"%(tagName,mh,kval)
+    label="%s_mX_%d_k_%s"%(tagName,mX,kval)+"_bkg_%s"%opts.pdfNameDict[tagName][truthPdf]
+    label_pull_vs_mx="%s_k_%s"%(tagName,kval)+"_bkg_%s"%opts.pdfNameDict[tagName][truthPdf]
     #if tagName not in "UntaggedTag_2": continue
     #if mu!=1.: continue
     #print f,tagName,mu,pdf
     #pulls_by_fitted_pdf=getAveragePull(f,mu,,truthPdf,fitPdf,tagName)
     pulls_by_fitted_pdf = getAveragePullNew(f,mu,truthPdf,fitPdf,tagName)
+    if (mu==0.):
+    #if (mu==2.5):
+    #if (mu==5.):
+        if not label_pull_vs_mx in pull_vs_mX_graphs: pull_vs_mX_graphs[label_pull_vs_mx]={}
+        for fitPdf in pulls_by_fitted_pdf.keys():
+            if not fitPdf in pull_vs_mX_graphs[label_pull_vs_mx]:pull_vs_mX_graphs[label_pull_vs_mx][fitPdf] =r.TGraphErrors()
+            g1 = pull_vs_mX_graphs[label_pull_vs_mx][fitPdf]
+            point = g1.GetN()
+            g1.SetPoint(point ,mX, pulls_by_fitted_pdf[fitPdf])
+            g1.SetPointError( point, 0,0)
+
     print pulls_by_fitted_pdf
     if not truthPdf in opts.pdfNameDict[tagName].keys(): continue 
     graphname= "%s_%s"%(label,opts.pdfNameDict[tagName][truthPdf])
@@ -492,12 +599,11 @@ def makePlotsPulls():
       print "setting point for graphname ", graphname , " fitPdf ", fitPdf , " mu ", mu, " pull ", pulls_by_fitted_pdf[fitPdf]
 
   print list_of_graphs
-  colorList=[r.kBlack,r.kRed,r.kGreen,r.kBlue,r.kMagenta,r.kOrange,r.kGray,r.kViolet,r.kCyan,r.kYellow]
+  colorList=[r.kBlack,r.kRed,r.kGreen,r.kBlue,r.kMagenta,r.kGray,r.kOrange,r.kViolet,r.kCyan,r.kYellow]
   
   mg_array={}
   tleg_array={}
   tlat_array={}
-  mean_pulls_array={}
   print sorted(list_of_graphs.keys())
   for k in sorted(list_of_graphs.keys()):
     c1 = r.TCanvas("c1","c1",600,200)
@@ -524,7 +630,6 @@ def makePlotsPulls():
       counter +=1
       mg.Add(g)
       mean = g.GetMean(2)
-      print "LC DEBUG XXX mean of graph ",mean , " for ", k ," fitPdf ", opts.pdfNameDict[k.split("_")[0]][fitPdf]
       #if not "%_%"%(k,opts.pdfNameDict[k.split("_")[0]][fitPdf]) 
       tleg.AddEntry(g,opts.pdfNameDict[k.split("_")[0]][fitPdf],"p")
     mg.Draw("AP")
@@ -543,6 +648,9 @@ def makePlotsPulls():
     print " value of k = ", k
     mX = k.rsplit("_",1)[0].split("mX_")[1].split("_")[0] 
     label = k.rsplit("_",1)[0].replace("mX_%s"%mX,"")
+    #label = k.rsplit("_",1)[0].replace("mX_%s"%mX,"")+"_bkg_%s"%(k.rsplit("_",1)[1])
+    print " LC DEBUG label ",label
+    #exit(1)
     if not label  in mg_array.keys() : mg_array[label] = []
     if not label  in tleg_array.keys() : tleg_array[label] = []
     if not label  in tlat_array.keys() : tlat_array[label] = []
@@ -568,6 +676,8 @@ def makePlotsPulls():
   
   print mg_array
   for tag in mg_array.keys():
+    print "LC DEBUG mg_array.keys() ", mg_array.keys()
+    #exit(1)
     r.gStyle.SetPadTopMargin(0.2)
     c2 = r.TCanvas("c2","c2",600, (len(mg_array[tag])+1)*200 )
     #c2.Divide(0,len(mg_array[tag]),0.01,0,r.kBlue)
@@ -614,16 +724,127 @@ def makePlotsPulls():
     #line.DrawLine(-1.1,0,2.2,0)
     c2.SaveAs("pulls_by_tag_%s.pdf"%tag)
     c2.SaveAs("pulls_by_tag_%s.png"%tag)
+  print "SORTED KEYS" 
+  print sorted(pull_vs_mX_graphs.keys())
+  for k in sorted(pull_vs_mX_graphs.keys()):
+    print " LC DEBUG start of this loop.."
+    tag_graphs=pull_vs_mX_graphs[k]
+    exoBSresult = getExoBSResults()[k.split("_")[0]]
+    print "LC DEBUG TEST"
+    dijetIndex=9999
+    if opts.drawCorrected:
+      for i in tag_graphs.keys():
+        if "dijet2" in opts.pdfNameDict[k.split("_")[0]][i]:
+          dijetIndex=i
+          break
+      if (dijetIndex==9999):
+        print "ERROR, you can only make this comparison if you have dijet2 in your fitPDFs!"
+        exit(1)
+      print "DEBUG LC (tag_graphs[dijetIndex] "
+      (tag_graphs[dijetIndex]).Print()
+      tag_graphs[dijetIndex]
+    if opts.drawCorrected: correctionFactors = getBScorrectionFactors(tag_graphs[dijetIndex],exoBSresult)
+    print "EXO BS result : " , exoBSresult
+    exoBSresult.Print()
+    exoBSresult.SetMarkerStyle(29)
+    exoBSresult.SetMarkerColor(13)
+    exoBSresult.SetLineColor(13)
+    c1 = r.TCanvas("c1","c1",600,200)
+    mg = r.TMultiGraph()
+    if opts.drawCorrected: mgCorrected = r.TMultiGraph()
+    mg.Add(exoBSresult)
+    if opts.drawCorrected: mgCorrected.Add(exoBSresult.Clone())
+
+    counter=0
+    tleg = r.TLegend(0.1,0.7,0.9,0.9)
+    tleg.SetNColumns(1+len(tag_graphs.keys()))
+    tleg.SetHeader("Fit Function")
+    tleg.SetFillColor(r.kWhite)
+    tleg.AddEntry(exoBSresult,"dijet2 (EXO BS)","p")
+    for fitPdf in tag_graphs.keys():
+      g =tag_graphs[fitPdf]
+      if opts.drawCorrected: correctedGraph = applyCorrections(g,correctionFactors)
+      g.SetMarkerColor(colorList[counter])
+      if opts.drawCorrected: correctedGraph.SetMarkerColor(colorList[counter])
+      g.SetMarkerSize(0.9)
+      if opts.drawCorrected: correctedGraph.SetMarkerSize(0.9)
+      if not fitPdf in opts.pdfNameDict[k.split("_")[0]].keys(): continue 
+      fitPdfString= opts.pdfNameDict[k.split("_")[0]][fitPdf]
+      if (fitPdf==0):
+        g.SetMarkerStyle(21)
+        g.SetMarkerSize(1.3)
+        if opts.drawCorrected: correctedGraph.SetMarkerStyle(21)
+        if opts.drawCorrected: correctedGraph.SetMarkerSize(1.3)
+      elif (fitPdf==-1):
+        g.SetMarkerStyle(20)
+        if opts.drawCorrected: correctedGraph.SetMarkerStyle(20)
+      else:
+        g.SetMarkerStyle(4)
+        if opts.drawCorrected: correctedGraph.SetMarkerStyle(4)
+      counter +=1
+      mg.Add(g)
+      if opts.drawCorrected: mgCorrected.Add(correctedGraph)
+      #print "LC DEBUG pritn corrected graph"
+      #correctedGraph.Print()
+      tleg.AddEntry(g,opts.pdfNameDict[k.split("_")[0]][fitPdf],"p")
+    mg.Draw("AP")
+    mg.GetXaxis().SetTitle("mX");
+    mg.GetXaxis().SetTitleSize(0.055);
+    mg.GetYaxis().SetTitle("<(XS - #hat{XS})/#sigma_{XS} > ");
+    mg.GetYaxis().SetTitleSize(0.055);
+    mg.GetYaxis().SetTitleSize(0.055);
+    mg.GetYaxis().SetLimits(-3.0,5.0)
+    mg.GetYaxis().SetRangeUser(-3.0,5.0)
+    mg.Draw("AP")
+    exoBSresult.Draw("same P")
+    line = r.TLine(-7.5,0,17.5,0)
+    box = r.TBox(250,-0.5,5500,0.5)
+    box.SetFillStyle(3003)
+    box.SetFillColor(r.kBlack)
+    box.DrawBox(250,-0.5,5500,0.5)
+    line.SetLineStyle(r.kDashed)
+    line.Draw()
+    tleg.Draw()
+    tlat = r.TLatex()
+    tlat.SetNDC()
+    tlat.SetTextSize(0.055)
+    tlat.DrawLatex(0.15,0.9,'#bf{%s}'%k.rsplit("_",1)[0])
+    mg.SetTitle(k)
+    c1.SaveAs("pulls_vs_mX_%s.pdf"%k)
+    c1.SaveAs("pulls_vs_mX_%s.png"%k)
+    c1.Clear()
+    if opts.drawCorrected:
+      mgCorrected.Draw("AP")
+      mgCorrected.GetXaxis().SetTitle("mX");
+      mgCorrected.GetXaxis().SetTitleSize(0.055);
+      mgCorrected.GetYaxis().SetTitle("<(XS - #hat{XS})/#sigma_{XS} > (corrected) ");
+      mgCorrected.GetYaxis().SetTitleSize(0.055);
+      mgCorrected.GetYaxis().SetLimits(-3.0,5.0)
+      mgCorrected.GetYaxis().SetRangeUser(-3.0,5.0)
+      #mgCorrected.GetXaxis().SetLimits(-1.2,2.2)
+      #mgCorrected.GetXaxis().SetLimits(-7.51,17.6)
+      #mgCorrected.GetXaxis().SetRangeUser(-1.2,2.2)
+      #mgCorrected.GetXaxis().SetRangeUser(-7.51,17.6)
+      mgCorrected.Draw("AP")
+      line.Draw()
+      tleg.Draw()
+      tlat.DrawLatex(0.15,0.9,'#bf{%s}'%k.rsplit("_",1)[0])
+      box.DrawBox(250,-0.5,5500,0.5)
+      mgCorrected.SetTitle(k+" (Corrected)")
+      c1.SaveAs("pulls_vs_mX_%s_corrected.pdf"%k)
+      c1.SaveAs("pulls_vs_mX_%s_corrected.png"%k)
+  print "DEBUG lc0"
   
 
 
 def getPdfNameDict(tags):
   pdfNameDict={} 
-  f="multipdf_all_ho.root"
+  f="multipdf_all_ho_%s.root"%opts.lumi
   tf = r.TFile.Open(f)
   #f= f.split("/")[-1]
   w = tf.Get("wtemplates")
   for tag in tags:
+   #mpdf= w.obj("model_bkg_%s_LC"%tag)
    mpdf= w.obj("model_bkg_%s"%tag)
    mpdf.Print()
    nPdfs = mpdf.getNumPdfs()
@@ -635,6 +856,7 @@ def getPdfNameDict(tags):
      pdfNameDict[tag][i]=mpdf.getPdf(i).GetName().split("_")[-1]
    #pdfNameDict[tag].append(mpdf.getPdf(i).GetName().split("_")[-1])
    pdfNameDict[tag][-1]="envelope"
+   pdfNameDict[tag][-2]="mc_bkg"
   return  pdfNameDict
 
 def makeSplittedDatacards(datacard):
@@ -672,18 +894,21 @@ def makeSplittedDatacards(datacard):
        else: 
         newline =line.replace("750","%s"%opts.mh)
         newline_gen =line.replace("750","%s"%opts.mh)
-        if opts.useMCBkgShape : 
-          if "shapes" in line and "bkg" in line :
-            newline_gen = newline.replace("multipdf_all_ho.root wtemplates:model_bkg_%s"%cat,"mctruth_7415v2_v5_mc_roohistpdf.root roohistpdfs:pdf_reduced_mctruth_pp_cic2_%s_binned"%cat)
-          if "rate" in line :
-            if cat=="EBEE" : newline_gen = "rate  1.000   569\n"
-            if cat=="EBEB" : newline_gen = "rate  1.000   1218\n"
-          if "shapes" in line and "data_obs" in line :
-            newline_gen = newline.replace("multipdf_all_ho.root wtemplates:data_%s"%cat,"mctruth_7415v2_v5_mc_roohistpdf.root roohistpdfs:reduced_mctruth_pp_cic2_%s_binned"%cat)
-            #newline = newline.replace("multipdf_all_ho.root wtemplates:data_%s"%cat,"mctruth_7415v2_v5_mc_roohistpdf.root roohistpdfs:reduced_mctruth_pp_cic2_%s_binned"%cat)
+        #if opts.useMCBkgShape : 
+        if "shapes" in line and "bkg" in line :
+            #newline_gen = newline.replace("multipdf_all_ho.root wtemplates:model_bkg_%s"%cat,"mctruth_7415v2_v5_mc_roohistpdf.root roohistpdfs:pdf_reduced_mctruth_pp_cic2_%s_binned"%cat)
+            newline = "shapes bkg  ch1_%s multipdf_all_ho_%s.root wtemplates:model_bkg_%s \n"%(cat,opts.lumi,cat)
+            #newline = "shapes bkg  ch1_%s multipdf_all_ho_%s.root wtemplates:model_bkg_%s_LC \n"%(cat,opts.lumi,cat)
+          #if "rate" in line :
+            #if cat=="EBEE" : newline_gen = "rate  1.000   %d\n"%(int(opts.nEvents.split(":")[0]))
+            #if cat=="EBEB" : newline_gen = "rate  1.000   %d\n"%(int(opts.nEvents.split(":")[1]))
+          #if "shapes" in line and "data_obs" in line :
+            #newline_gen = newline.replace("multipdf_all_ho.root wtemplates:data_%s"%cat,"mctruth_7415v2_v5_mc_roohistpdf.root roohistpdfs:reduced_mctruth_pp_cic2_%s_binned"%cat)#.replace("data","data_cic2")
+            #newline = newline.replace("data_%s"%cat,"data_cic2_%s"%cat)
         newCard.write(newline)
         newCard_gen.write(newline_gen)
     card.close()
+    newCard.write("pdfindex_%s discrete"%cat)
     newCard.close()
     newCard_gen.close()
     system('mv %s %s'%(newCard.name,card.name))
@@ -705,8 +930,8 @@ def makeSplittedDatacards(datacard):
 #muValues = [-0.75,-0.5,-0.25,0.25,0.5,0.75,1.25,1.5,1.75]
 #muValues = [-1.0,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0,1.25,1.5,1.75,2.0]
 #muValues = [0.25,0.5,0.75,1.0,1.25,1.5,1.75,2]
-muValues = [-5,0,5,10,15]
-#muValues = [-5,-2.5,0,2.5,5,7.5,10,12.5,15]
+#muValues = [0]
+muValues = [0,2.5,5]
 #muValues = [-5,-2.5,0,2.5,5,7.5,10,12.5,15]
 #muValues = [5]
 #muValues = [2]
@@ -714,6 +939,7 @@ muValues = [-5,0,5,10,15]
 #muValues = [-]
 #catValues = ["UntaggedTag_0","UntaggedTag_1","UntaggedTag_2","UntaggedTag_3","VBFTag_0","VBFTag_1","TTHLeptonicTag","TTHHadronicTag"]
 catValues = ["EBEB","EBEE"]
+#catValues = ["EBEB"]
 
 
 if opts.splitDatacard:
@@ -721,13 +947,24 @@ if opts.splitDatacard:
   exit(1)
 
 if (opts.k and opts.mh):
-  opts.splitDatacard="datacards/k%s/datacard_full_analysis_spring15_7415v2_sync_v5_cic2_default_shapes_grav_%s_750.txt"%(opts.k,opts.k)
+  print "DEBUG LC 1"
+  #opts.splitDatacard="datacardsNew/k%s/datacard_full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_2.69_grav_%s_750.txt"%(opts.k,opts.k)
+  #file_path="%s/%s"%(opts.splitDatacard.rsplit("/",1)[0],"full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_2.69.root")
+  opts.splitDatacard="datacardsNew/k%s/datacard_full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_%s_grav_%s_750.txt"%(opts.k,opts.lumi,opts.k)
+  file_path="%s/%s"%(opts.splitDatacard.rsplit("/",1)[0],"full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_%s.root"%opts.lumi)
+  if (os.path.isfile(file_path)):
+    print "[INFO] copied datacard"
+  else:
+    print "[ERROR] could not find ", file_path
+    exit (1)
+  os.system("cp %s ."%(file_path))
+  print "DEBUG LC 2"
   makeSplittedDatacards(opts.splitDatacard)
+  print "DEBUG LC 3"
   if (opts.justSplit) : exit(1)
 
 
 opts.pdfNameDict = getPdfNameDict(catValues)
-
 if opts.hadd:
   trawlHadd()
   exit(1)
@@ -739,6 +976,7 @@ if opts.resubmit:
 if opts.makePlots:
   #makePlotsDeltaL()
   makePlotsPulls()
+  print "DEBUG lc01"
   exit(1)
 
 if opts.deleteFailures:
@@ -751,10 +989,10 @@ system('mkdir -p biasStudyJobs')
 for mu in muValues:
   for cat in catValues:
     pdfValues=opts.pdfNameDict[cat].keys()
-    #pdfValues=[-1,4]
-    for truthPdf in [-1]:
+    for truthPdf in pdfValues:
     #for truthPdf in [4]:
       for fitPdf in pdfValues:
+        if (fitPdf==-2): continue
         counter=0
         system('mkdir -p biasStudyJobs/%s_mu_%.2f_mh_%d_k_%s_truthPdf_%d_fitPdf_%d_Pulls'%(cat,mu,opts.mh,opts.k,truthPdf,fitPdf))
         #system('rm biasStudyJobs/%s_mu_%d_pdf_%d/sub*'%(cat,mu,pdf))
@@ -762,7 +1000,7 @@ for mu in muValues:
            #submit paramtetric 
            file = open('%s/biasStudyJobs/%s_mu_%.2f_mh_%d_k_%s_truthPdf_%d_fitPdf_%d_Pulls/sub.sh'%(opts.outDir,cat,mu,opts.mh,opts.k,truthPdf,fitPdf),'w')
            print " making", ('%s/biasStudyJobs/%s_mu_%.2f_mh_%d_k_%s_truthPdf_%d_fitPdf_%d_Pulls/sub.sh'%(opts.outDir,cat,mu,opts.mh,opts.k,truthPdf,fitPdf),'w')
-           writePreamble(file,mu,cat,truthPdf,fitPdf,"Pulls")
+           writePreamble(file,mu,opts.mh,cat,truthPdf,fitPdf,"Pulls")
            writePostamble(file)
 '''
 for mu in muValues:

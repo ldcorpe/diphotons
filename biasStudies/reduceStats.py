@@ -17,9 +17,11 @@ GetProcXsection = lambda x,y : norm.GetXsection(x,y)
 r.gROOT.SetBatch(1)
 infileName=sys.argv[1]
 f = r.TFile(infileName)
-outfile = r.TFile.Open(infileName.replace(".root","_reduced.root"),"RECREATE") 
+#outfile = r.TFile.Open(infileName.replace(".root","_reduced.root"),"RECREATE") 
 #ws = f.Get("multipdf")
-ws = f.Get("w")
+ws = f.Get("wtemplates")
+ws.Print()
+exit(1)
 #outws = r.RooWorkspace("multipdf_reduced");
 #data = ws.data("roohist_data_mass_UntaggedTag_2")
 #dataReduced = data.emptyClone(data.GetName()+"_reduced",data.GetName()+"_reduced")

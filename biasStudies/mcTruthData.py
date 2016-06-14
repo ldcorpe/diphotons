@@ -16,6 +16,7 @@ infileName=sys.argv[1]
 f = r.TFile(infileName)
 outfile = r.TFile.Open(infileName.replace(".root","_mc_roohistpdf.root"),"RECREATE")
 
+_lumiFactor=10.
 ws = f.Get("wtemplates")
 #nBinsEBEE=(10010-230)
 #nBinsEBEB=(10000-320)
@@ -122,10 +123,10 @@ for data in dsEBEB+dsEBEE:
     dbinned.get(i)
     nRDH= dbinned.weight()
     if not (nTH1F-nRDH == 0) : print "compare bin ",i," nTH1F= ", nTH1F, ", nRDH=",nRDH, " difference = ", nTH1F-nRDH
-    print "bin error for bin ", i ," " ,th1f0.GetBinError(i)
+    #print "bin error for bin ", i ," " ,th1f0.GetBinError(i)
   print data.GetName() , " BINNED CLONE"
   #data.binnedClone().Print()
-  dbinned.Print("V")
+  dbinned.Print("")
   print "TH1F " , th1f0.GetNbinsX() , " bins between ", th1f0.GetBinLowEdge(1), " and ", th1f0.GetBinLowEdge(dbinned.numEntries())+th1f0.GetBinWidth(0)
   print "-----------------------------------"
   #dbinned.plotOn(frame,r.RooFit.MarkerColor(colorList[counter]),r.RooFit.MarkerSize(1),r.RooFit.Binning(69))
@@ -142,7 +143,7 @@ for data in dsEBEB+dsEBEE:
     else: 
       w0 = 0.0001
     weight.setVal(w0*(factor))
-    print "evt ", i, " weight  ", dbinned.weight(), " factor ", factor , " final weight=", weight.getVal()
+    #print "evt ", i, " weight  ", dbinned.weight(), " factor ", factor , " final weight=", weight.getVal()
     dbinnedNormalised.add(r.RooArgSet(massVar),weight.getVal())
     th1f.Fill(massVar.getVal(),weight.getVal())
   for i in range(0,th1f.GetNbinsX()):
@@ -168,7 +169,7 @@ for data in dsEBEB+dsEBEE:
     massVar.setVal(float(i))
     #getattr(rooHistPdf,'evaluate')()
     val = rooHistPdf.getVal()
-    if (val>-1) : print " for mass ", massVar.getVal(), " pdf value is ", val
+    #if (val>-1) : print " for mass ", massVar.getVal(), " pdf value is ", val
   #h.SetMarkerColor(colorList[counter])
   print "-----------------------------------"
   #h.SetMarkerStyle(20)
