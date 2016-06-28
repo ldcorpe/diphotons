@@ -83,6 +83,7 @@ parser.add_option("-k",default=None,help="with of signal")
 parser.add_option("-q","--queue",help="Which batch queue")
 parser.add_option("--runLocal",default=False,action="store_true",help="Run locally")
 parser.add_option("--drawCorrected",default=False,action="store_true",help="Apply stupid correction")
+parser.add_option("--skipMerged",default=False,action="store_true",help="When using the hadd option, do not re-merge already merged files")
 parser.add_option("--useMCBkgShape",default=False,action="store_true",help="Use MC rooHistPdf as bkg shape instead")
 parser.add_option("--parametric",default=True,action="store_true",help="submit parameteric jobs")
 parser.add_option("--batch",default="LSF",help="Which batch system to use (LSF,IC)")
@@ -112,19 +113,22 @@ def system(exec_line):
 
 
 def getExoBSResults():
-  f = r.TFile("profile_pull-3.root")
-  c = f.Get("profile_pull")
-  tGraphsArray={}
   names=["EBEB","EBEE"]
-  colours=[r.kRed,r.kBlue]
-  counter=0
-  for item in c.GetListOfPrimitives():
-    if (item.InheritsFrom("TGraph")):
+  tGraphsArray={}
+  for name in names:
+    f = r.TFile("profile_pull_%s_dijet.root"%name)
+    print " opening file for", name 
+    c = f.Get("profile_pull_%s_dijet"%name)
+    for item in c.GetListOfPrimitives():
+      if (item.InheritsFrom("TGraph")):
       #print "minimum ", item.GetMinimum()
-      #item.Print()
-      tGraphsArray[names[counter]]=item.Clone(names[counter])
-      counter=counter+1
-  f.Close()
+        print "========================="
+        item.GetName()
+        print
+        item.Print()
+        tGraphsArray[name]=item.Clone(name)
+        break
+    f.Close()
   return tGraphsArray
 
 def getBScorrectionFactors(dijetNew, dijetOld ):
@@ -175,7 +179,7 @@ def writePreamble(sub_file,mu,mh,cat,truthPdf,fitPdf,index):
   #sub_file.write('cd scratch_$number\n')
   sub_file.write('MU=%.2f \n'%mu)
   sub_file.write('MHhat=%d \n'%opts.mh)
-  sub_file.write('NTOYS=200 \n')
+  sub_file.write('NTOYS=50 \n')
   
   if (mh>1500):
     sub_file.write('MINR=-1 \n')
@@ -217,8 +221,8 @@ def writePostamble(sub_file):
     if (opts.batch == "IC") : 
         print "DEBUG opts.batch ", opts.batch
         if (opts.parametric):
-          system('qsub -q %s -o %s.log -e %s.err -t 1-3:1 -tc 1 -l h_rt=2:55:0 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
-          print  "system(",'qsub -q %s -o %s.log -e %s.err -t 1-3:1 -tc 1 -l h_rt=2:55:0 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name))
+          system('qsub -q %s -o %s.log -e %s.err -t 1-10:1  -l h_rt=2:55:0 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
+          print  "system(",'qsub -q %s -o %s.log -e %s.err -t 1-3:1  -l h_rt=2:55:0 %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name))
         else:
            system('qsub -q %s -o %s.log -e %s.err -l h_rt=2:55:0  %s'%(opts.queue,os.path.abspath(sub_file.name),os.path.abspath(sub_file.name),os.path.abspath(sub_file.name)))
   if opts.runLocal:
@@ -248,15 +252,25 @@ def update_progress(progress):
 def trawlHadd():
   print "[INFO] trawling hadd"
   list_of_dirs=set()
-  for root, dirs, files in os.walk(opts.hadd):
-    for x in files:
+  #for root, dirs, files in os.walk(opts.hadd):
+  #  for x in files:
+  for root in os.listdir(opts.hadd): 
+    listx = os.listdir('%s/%s'%(opts.hadd,root))
+    skip =False
+    if (opts.skipMerged): 
+      for x in listx:
+         if "merged.root" in x : 
+          skip =True
+          break
+    if (skip) : continue
+    for x in listx:
       if 'higgsCombine' in x and '.root' in x:
         if (opts.grep==None) or (opts.grep in "%s/%s"%(root,x)):
-          list_of_dirs.add(root)
+          list_of_dirs.add('%s/%s'%(opts.hadd,root))
       if 'mlfit' in x and '.root' in x: 
         if (opts.grep==None) or (opts.grep in "%s/%s"%(root,x)):
-          #print "add dit ", root
-          list_of_dirs.add(root)
+          print "add dir ", '%s/%s'%(opts.hadd,root)
+          list_of_dirs.add('%s/%s'%(opts.hadd,root))
   #for i in range (0,len(list_of_dirs)):
   #  interval = (imax+10)/100
   #  #print "i, max, interval" , i, imax, interval 
@@ -270,28 +284,36 @@ def trawlHadd():
   counter =0.
   imax= len(list_of_dirs)
   for dir in list_of_dirs:
-    for root, dirs, files in os.walk(dir):
-      list_of_files_DeltaL=''
-      list_of_files_Pulls=''
-      for file in fnmatch.filter(files,'higgsCombine*.root'):
-        list_of_files_DeltaL += ' '+os.path.join(root,'%s'%file)
-      for file in fnmatch.filter(files,'ml*.root'):
-        list_of_files_Pulls += ' '+os.path.join(root,'%s'%file)
-      #print root, ' -- ', len(list_of_files_DeltaL.split())
-      exec_line = 'hadd -f %s/%s.merged.root%s > /dev/null'%(dir,os.path.basename(dir),list_of_files_DeltaL)
-      #print root, ' -- ', len(list_of_files_Pulls.split())
-      exec_line = 'hadd -f %s/%s.merged.root%s > /dev/null'%(dir,os.path.basename(dir),list_of_files_Pulls)
-      update_progress(float(counter)/float(imax))
-      counter =counter+1
-      #if opts.verbose: print exec_line
-      system(exec_line)
+    #print "DEBUG considerign dir for hadding ", dir
+    list_of_files_DeltaL=''
+    list_of_files_Pulls=''
+    for filename in os.listdir(dir):
+      #print "DEBUG considerign dir/file for hadding ", dir, " / ", filename
+      #for file in files:
+      #  list_of_files_DeltaL += ' '+os.path.join(dir,'%s'%file)
+      #for file in files:
+      if not 'mlfit' in filename: continue
+      if not '.root' in filename: continue
+      list_of_files_Pulls += ' '+os.path.join(dir,'%s'%filename)
+    #print dir, ' -- ', len(list_of_files_DeltaL.split())
+    #print 'hadd -f %s/%s.merged.root%s > /dev/null'%(dir,os.path.basename(dir),list_of_files_DeltaL)
+    #exec_line = 'hadd -f %s/%s.merged.root%s > /dev/null'%(dir,os.path.basename(dir),list_of_files_DeltaL)
+    #print dir, ' -- ', len(list_of_files_Pulls.split())
+    #print  'hadd -f %s/%s.merged.root%s > /dev/null'%(dir,os.path.basename(dir),list_of_files_Pulls)
+    exec_line = 'hadd -f %s/%s.merged.root%s > /dev/null'%(dir,os.path.basename(dir),list_of_files_Pulls)
+    update_progress(float(counter)/float(imax))
+    counter =counter+1
+    #if opts.verbose: print exec_line
+    system(exec_line)
   update_progress(1)
 
 def trawlResubmit():
   print "[INFO] trawling hadd"
   list_of_files=[]
-  for root, dirs, files in os.walk(opts.resubmit):
-    for x in files:
+  #for root, dirs, files in os.walk(opts.resubmit):
+    #for x in files:
+  for root in os.listdir(opts.resubmit):
+    for x in os.listdir('%s/%s'%(opts.resubmit,root)):
       if '.sh.fail' in x: 
         print "adding", root+"/"+x.split(".fail")[0] 
         list_of_files.append(root+"/"+x.split(".fail")[0])
@@ -312,7 +334,7 @@ def trawlResubmit():
       if "$SGE_TASK_ID" in line:
         job.write(line.replace("$SGE_TASK_ID","%d"%int(index)))
       elif "NTOYS=200" in line:
-        job.write(line.replace("NTOYS=200","NTOYS=100"))
+        job.write(line.replace("NTOYS=200","NTOYS=50"))
       else :
         job.write(line)
     print "resubmitting", job
@@ -322,8 +344,10 @@ def trawlResubmit():
 def deleteFailures():
   print "[INFO] trawling hadd"
   list_of_files=[]
-  for root, dirs, files in os.walk(opts.deleteFailures):
-    for x in files:
+  #for root, dirs, files in os.walk(opts.deleteFailures):
+    #for x in files:
+  for root in os.listdir(opts.deleteFailures):
+    for x in os.listdir('%s/%s'%(opts.deleteFailures,root)):
       if '.sh.fail' in x: 
         print "adding", root+"/"+x.split(".fail")[0] 
         list_of_files.append(root+"/"+x.split(".fail")[0])
@@ -474,8 +498,10 @@ def getAveragePull(f,muTrue,pdfTrue,pdfFit,tag):
 def makePlotsDeltaL():
   list_of_files=[]
   r.gROOT.SetBatch(1)
-  for root, dirs, files in os.walk(opts.makePlots):
-    for x in files:
+  #for root, dirs, files in os.walk(opts.makePlots):
+    #for x in files:
+  for root in os.listdir(opts.makePlots):
+    for x in os.listdir('%s/%s'%(opts.makePlots,root)):
       if 'merged.root' in x and "Delta" in x: 
         print "adding", root+"/"+x.split(".fail")[0] 
         list_of_files.append(root+"/"+x.split(".fail")[0])
@@ -547,12 +573,14 @@ def makePlotsPulls():
   wf.close()
   list_of_files=[]
   r.gROOT.SetBatch(1)
-  for root, dirs, files in os.walk(opts.makePlots):
-    for x in files:
+  #for root, dirs, files in os.walk(opts.makePlots):
+  #  for x in files:
+  for root in os.listdir(opts.makePlots):
+    for x in os.listdir('%s/%s'%(opts.makePlots,root)):
       if 'merged.root' in x and "Pulls" in x: 
         if (opts.grep==None) or (opts.grep in "%s/%s"%(root,x)):
-          print "adding", root+"/"+x.split(".fail")[0] 
-          list_of_files.append(root+"/"+x.split(".fail")[0])
+          print "adding", (opts.makePlots+"/"+root+"/"+x.split(".fail")[0]) 
+          list_of_files.append(opts.makePlots+"/"+root+"/"+x.split(".fail")[0])
   for f in list_of_files:
     print f
     #tf = r.TFile.Open(f)
@@ -793,8 +821,8 @@ def makePlotsPulls():
     mg.GetYaxis().SetTitle("<(XS - #hat{XS})/#sigma_{XS} > ");
     mg.GetYaxis().SetTitleSize(0.055);
     mg.GetYaxis().SetTitleSize(0.055);
-    mg.GetYaxis().SetLimits(-3.0,5.0)
-    mg.GetYaxis().SetRangeUser(-3.0,5.0)
+    mg.GetYaxis().SetLimits(-1.0,1.50)
+    mg.GetYaxis().SetRangeUser(-1.0,1.50)
     mg.Draw("AP")
     exoBSresult.Draw("same P")
     line = r.TLine(-7.5,0,17.5,0)
@@ -819,8 +847,8 @@ def makePlotsPulls():
       mgCorrected.GetXaxis().SetTitleSize(0.055);
       mgCorrected.GetYaxis().SetTitle("<(XS - #hat{XS})/#sigma_{XS} > (corrected) ");
       mgCorrected.GetYaxis().SetTitleSize(0.055);
-      mgCorrected.GetYaxis().SetLimits(-3.0,5.0)
-      mgCorrected.GetYaxis().SetRangeUser(-3.0,5.0)
+      mgCorrected.GetYaxis().SetLimits(-1.0,1.50)
+      mgCorrected.GetYaxis().SetRangeUser(-1.0,1.50)
       #mgCorrected.GetXaxis().SetLimits(-1.2,2.2)
       #mgCorrected.GetXaxis().SetLimits(-7.51,17.6)
       #mgCorrected.GetXaxis().SetRangeUser(-1.2,2.2)
@@ -923,6 +951,8 @@ def makeSplittedDatacards(datacard):
     print "new gen datacard done ", card.name.replace(".txt","_gen.txt"), " aka  biasStudyWS_k%s_m%d_%s_gen.root"%(opts.k, int(opts.mh),cat)
 
 
+#getExoBSResults()
+#exit(1)
 #muValues = [0.,1.,2.]
 #muValues = [-1.0,-0.75,-0.5,-0.25,0.,0.25,0.5,0.75,1.,1.25,1.5,1.75,2.]
 #muValues = [-1.0,-0.5,0.,0.5,1.,1.5,2.]
@@ -930,8 +960,8 @@ def makeSplittedDatacards(datacard):
 #muValues = [-0.75,-0.5,-0.25,0.25,0.5,0.75,1.25,1.5,1.75]
 #muValues = [-1.0,-0.5,-0.25,0.0,0.25,0.5,0.75,1.0,1.25,1.5,1.75,2.0]
 #muValues = [0.25,0.5,0.75,1.0,1.25,1.5,1.75,2]
-#muValues = [0]
-muValues = [0,2.5,5]
+muValues = [0]
+#muValues = [0,2.5,5]
 #muValues = [-5,-2.5,0,2.5,5,7.5,10,12.5,15]
 #muValues = [5]
 #muValues = [2]
@@ -989,8 +1019,8 @@ system('mkdir -p biasStudyJobs')
 for mu in muValues:
   for cat in catValues:
     pdfValues=opts.pdfNameDict[cat].keys()
-    for truthPdf in pdfValues:
-    #for truthPdf in [4]:
+    #for truthPdf in pdfValues:
+    for truthPdf in [-2]:
       for fitPdf in pdfValues:
         if (fitPdf==-2): continue
         counter=0

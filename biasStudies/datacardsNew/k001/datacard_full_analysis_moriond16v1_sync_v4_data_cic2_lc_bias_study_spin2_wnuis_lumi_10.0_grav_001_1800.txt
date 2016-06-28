@@ -1,0 +1,39 @@
+
+## Signal: grav_001_1800 - 13TeV
+##
+----------------------------------------------------------------------------------------------------------------------------------
+imax * number of channels
+jmax * number of backgrounds
+kmax * number of nuisance parameters (source of systematic uncertainties)
+----------------------------------------------------------------------------------------------------------------------------------
+shapes sig           EBEB  full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_10.0_grav_001_1800.root wtemplates:model_signal_grav_001_1800_EBEB wtemplates:model_signal_grav_001_1800_EBEB_$SYSTEMATIC
+shapes bkg           EBEB  full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_10.0.root wtemplates:model_bkg_EBEB
+shapes data_obs      EBEB  full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_10.0.root wtemplates:data_EBEB
+shapes sig           EBEE  full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_10.0_grav_001_1800.root wtemplates:model_signal_grav_001_1800_EBEE wtemplates:model_signal_grav_001_1800_EBEE_$SYSTEMATIC
+shapes bkg           EBEE  full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_10.0.root wtemplates:model_bkg_EBEE
+shapes data_obs      EBEE  full_analysis_moriond16v1_sync_v4_data_cic2_lc_bias_study_spin2_wnuis_lumi_10.0.root wtemplates:data_EBEE
+----------------------------------------------------------------------------------------------------------------------------------
+bin                  EBEB             EBEE            
+observation          -1             -1            
+----------------------------------------------------------------------------------------------------------------------------------
+bin                  EBEB           EBEB           EBEE           EBEE          
+process              sig            bkg            sig            bkg           
+process              0              1              0              1             
+rate                 1              1              1              1             
+----------------------------------------------------------------------------------------------------------------------------------
+PDFs  lnN            1.060          -              1.060          -             
+eff13TeV_0T  lnN     -              -              -              -             
+lumi13TeV_0T  lnN    -              -              -              -             
+eff13TeV_38T  lnN    1.080          -              1.080          -             
+lumi13TeV_38T  lnN   1.027          -              1.027          -             
+energyScaleEBEEeig1 shape -              -              0.967          -             
+energyScaleEBEEeig2 shape -              -              0.253          -             
+energyResolutionEBEE_13TeV_38T shape -              -              1              -             
+energyScaleEBEBeig2 shape 0.12           -              -              -             
+energyScaleEBEBeig1 shape 0.992          -              -              -             
+energyResolutionEBEB_13TeV_38T shape 1              -              -              -             
+
+
+
+----------------------------------------------------------------------------------------------------------------------------------
+
