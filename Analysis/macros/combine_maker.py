@@ -45,11 +45,37 @@ class CombineApp(TemplatesApp):
                                     help="Observable used in the fit default : [%default]",
                                     ),
                         make_option("--observables",dest="observables",action="callback",callback=optpars_utils.Load(scratch=True),type="string",
-                                    default={ "EBEE" : "mggEBEE[3400,320,10000]",
-                                              "EBEB" : "mggEBEB[4000,230,10000]"
+                                    default={
+                                "EBEE" : "mggEBEE[3400,320,10000]",
+                                
+                                
+                                
+                                "EBEB" : "mggEBEB[4000,230,10000]"
                                               },
                                     help="Per category observable ranges : [%default]",
                                     ),
+                        make_option("--norm-nuisances",dest="norm_nuisances",action="callback",callback=optpars_utils.Load(scratch=True),type="string",
+                                    default={ 
+                                "eff13TeV_38T" : {
+                                    "EBEB" : 0.08,
+                                    "EBEE" : 0.08,
+                                    },
+                                "eff13TeV_0T" : {
+                                    "EBEB0T" : 0.16,
+                                    "EBEE0T" : 0.16,
+                                    },
+                                "PDFs" : { "default" : 0.06
+                                    },
+                                "lumi13TeV_38T" : {
+                                    "EBEB" : 0.027,
+                                    "EBEE" : 0.027,
+                                    },
+                                "lumi13TeV_0T" : {
+                                    "EBEB0T" : 0.12,
+                                    "EBEE0T" : 0.12,
+                                    },
+                                              },
+                                    help="normalization uncertainties"),
                         make_option("--make-pr-plot",dest="make_pr_plot",action="store_true",default=False,
                                     help="Fit background",
                                     ),                       
@@ -152,7 +178,10 @@ class CombineApp(TemplatesApp):
                         make_option("--plot-norm-dataset",dest="plot_norm_dataset",action="store_true",
                                     default=False,
                                     help="Use minos for bands computation",
-                                    ),      
+                                    ),
+                        make_option("--do-parametric-signal-nuisances",dest="do_parametric_signal_nuisances",action="store_true",default=True,
+                                                                                                help="Add energy scale uncertainty",
+                                                                                                                                    ),
                         make_option("--freeze-params",dest="freeze_params",action="store_true",default=False,
                                     help="Freeze background parameters after fitting",
                                     ),                        
@@ -208,18 +237,12 @@ class CombineApp(TemplatesApp):
                                               ## "masses" : [10,500,5000],
                                               "masses" : ## [500,505,506,510],
                                               ## list(np.concatenate((np.arange(500,750,2),np.arange(750,1000,2),np.arange(1000,1600,4),np.arange(1600,4500,100)))),
-                                              [750.],
+                                              [500.,750.,1000.,3000.],
                                               "interpolate_below" : 0,
                                               "pdfs"    : { "001" : {"EBEB" : "ConvolutionRhPdf_catEBEB_mass%1.5g_kpl001", 
                                                                      "EBEE" : "ConvolutionRhPdf_catEBEE_mass%1.5g_kpl001" },
-                                                            "005" : {"EBEB" : "ConvolutionRhPdf_catEBEB_mass%1.5g_kpl005", 
-                                                                     "EBEE" : "ConvolutionRhPdf_catEBEE_mass%1.5g_kpl005" },
-                                                            "007" : {"EBEB" : "ConvolutionRhPdf_catEBEB_mass%1.5g_kpl007", 
-                                                                     "EBEE" : "ConvolutionRhPdf_catEBEE_mass%1.5g_kpl007" },
                                                             "01" : {"EBEB" : "ConvolutionRhPdf_catEBEB_mass%1.5g_kpl01", 
                                                                     "EBEE" : "ConvolutionRhPdf_catEBEE_mass%1.5g_kpl01" },
-                                                            "015" : {"EBEB" : "ConvolutionRhPdf_catEBEB_mass%1.5g_kpl015", 
-                                                                     "EBEE" : "ConvolutionRhPdf_catEBEE_mass%1.5g_kpl015" },
                                                             "02" : {"EBEB" : "ConvolutionRhPdf_catEBEB_mass%1.5g_kpl02", 
                                                                     "EBEE" : "ConvolutionRhPdf_catEBEE_mass%1.5g_kpl02" },
                                                             }
@@ -469,9 +492,13 @@ class CombineApp(TemplatesApp):
         ###     options.background_root_file = options.read_ws
 
         bkname_prefix = None
+        print " DEBUG LC A background_root_file ", options.background_root_file
         if not options.background_root_file:
+            print " DEBUG LC B background_root_file ",options.background_root_file
             options.background_root_file = options.read_ws
+            print " DEBUG LC C background_root_file ", options.background_root_file
         elif not ".root" in options.background_root_file:
+            print " DEBUG LC D background_root_file ", options.background_root_file
             bkname_prefix = options.background_root_file
 
         ## isNameProvided = False
@@ -497,9 +524,13 @@ class CombineApp(TemplatesApp):
             elif not options.signal_root_file:
                 options.signal_root_file = signame+".root" 
             if bkname_prefix:
+                print " DEBUG LC E background_root_file ", options.background_root_file
                 bkgfile = "%s%s.root" % ( bkname_prefix, signame )
+                print " DEBUG LC F  bkgfile ",  bkgfile
             else:
+                print " DEBUG LC G background_root_file ", options.background_root_file
                 bkgfile = options.background_root_file
+                print " DEBUG LC H  bkgfile ",  bkgfile
                 
             ### if(options.cardname != None):    
             ###     datacard = self.open(options.cardname,"w+")
@@ -520,7 +551,6 @@ class CombineApp(TemplatesApp):
             print "signal     ws : %s" % options.signal_root_file
             print "datacard      : %s" % cardname
             print 
-                            
             datacard.write("""
 ## Signal: %s - 13TeV
 ##
@@ -757,8 +787,9 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                 else:
                     bias_name = None
 
-                self.plotBkgFit(options,data,model,roobs,"%s%s" % (comp,cat),poissonErrs=True, plot_binning=options.cat_plot_binning.get(cat,options.plot_binning),
-                                blabel=bias_name, signalmodel=signal, signalmodel_norm=signal_norm)
+                print "LC debug plot bkg fit before"
+                self.plotBkgFit(options,data,model,roobs,"%s%s" % (comp,cat),poissonErrs=True, plot_binning=options.cat_plot_binning.get(cat,options.plot_binning),blabel=bias_name, signalmodel=signal, signalmodel_norm=signal_norm)
+                print "LC debug plot bkg fit after"
 
 
     ## ------------------------------------------------------------------------------------------------------------        
@@ -797,7 +828,9 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
             return
         
         if len(signals) > 1:
+            print " DEBUG LC H  len(signals) > 1  background_root_fil ",  options.background_root_file
             options.background_root_file = options.background_root_file.replace(".root","_bkgnbias_") ## change this for generateDatacard
+            print " DEBUG LC I  len(signals) > 1  background_root_fil ",  options.background_root_file
         
 
         bkg = {}
@@ -919,6 +952,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                     self.workspace_.rooImport(sbPdf,RooFit.RecycleConflictNodes())
                 
             if len(signals) > 1:
+                print " DEBUG LC K  len(signals) > 1  background_root_fil ",  options.background_root_file
                 options.output_file = "%s%s.root" % (options.background_root_file,signame)
             self.saveWs(options)
             self.bookNewWs(False)
@@ -1044,7 +1078,9 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         fitname = options.fit_name
         fit = options.fits[fitname]
         
+        print " DEBUG LC L   background_root_fil ",  options.background_root_file
         options.background_root_file = options.output_file # set name for datacard generation
+        print " DEBUG LC M   background_root_fil ",  options.background_root_file
         
         ### roobs = self.buildRooVar(*(self.getVar(options.observable)), recycle=False, importToWs=False)
         ### #roobs.setBins(5000,"cache")
@@ -1434,13 +1470,16 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                     
                     plbinned = ROOT.RooDataHist("%s_binned_tmp" % plreduced.GetName(), "%s_binned_tmp" % plreduced.GetName(), ROOT.RooArgSet(roobs,rootempl),"templateBinning%s"%cat )
                     plbinned.add(plreduced)
+                    print "LC debug 0 plot bkg fit before"
                     self.plotBkgFit(options,plbinned,templpdf,rootempl,"template_proj_%s%s" % (comp,cat),poissonErrs=True,logy=False,logx=False,
                                     plot_binning=list(unrol_binning),
                                     opts=[RooFit.ProjWData(ROOT.RooArgSet(roobs),plbinned)], bias_funcs={}, forceSkipBands=True )
+                    print "LC debug 0 plot bkg fit during"
                     
                     self.plotBkgFit(options,plbinned,pdf,rootempl,"template_cond_%s%s" % (comp,cat),poissonErrs=True,logy=False,logx=False,
                                     plot_binning=list(unrol_binning), bias_funcs={} )
                     
+                    print "LC debug 0 plot bkg fit after"
                 ## plot the fit result
                 if options.include_bias_in_bands:
                     bias_name = "%s_%s_%d_%d" % (cat,model,int(roobs.getMin()),int(roobs.getMax()))
@@ -1455,9 +1494,12 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                     signal_norm = self.rooFunc("model_signal_%s_%s_norm" % (signame,cat))
                     print signal_norm, signal 
                     
+                print "LC debug 1 plot bkg fit before"
                 self.plotBkgFit(options,plreduced,pdf,roobs,"%s%s" % (comp,cat),poissonErrs=True, plot_binning=options.cat_plot_binning.get(cat,options.plot_binning),
                                 blabel=bias_name,signalmodel=signal,signalmodel_norm=signal_norm)
+                print "LC debug 1 plot bkg fitduring" 
                 self.plotBkgFit(options,plreduced,pdf,roobs,"%s%s_lin" % (comp,cat),poissonErrs=True, plot_binning=options.cat_plot_binning.get(cat,options.plot_binning),logy=False,blabel=bias_name,signalmodel=signal,signalmodel_norm=signal_norm)
+                print "LC debug 1 plot bkg fit after"
                 
                 ## normalization has to be called <pdfname>_norm or combine won't find it
                 if options.norm_as_fractions:
@@ -1916,10 +1958,13 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                     ##     print "Integral templpdf only templateNdim2_unroll    :", ppPdf.createIntegral(ROOT.RooArgSet(rootempl),"templateBinning%s"%cat).getVal()
                     ##     print "Integral combined pdf    :", pdf.createIntegral(ROOT.RooArgSet(rootempl,roobs),"templateBinning%s"%cat).getVal()
                     ##     print
+                    print "LC debug 2 plot bkg fit beofre"
                     self.plotBkgFit(options,binned,pdf,rootempl,"signal_%s_%s_%s" % (signame,rootempl.GetName(),cat),poissonErrs=False,logy=False,logx=False,plot_binning=rootempl_binning,opts=[RooFit.ProjWData(ROOT.RooArgSet(roobs),binned)], bias_funcs={},sig=True, forceSkipBands=True)
                 
+                print "LC debug 2 plot bkg fit during"
                 self.plotBkgFit(options,reduced,pdf,roobs,"signal_%s_%s_%s" % (signame,roobs.GetName(),cat),poissonErrs=False,sig=True,logx=False,logy=False,
                                 plot_binning=plot_signal_binnning, forceSkipBands=True)
+                print "LC debug 2 plot bkg fit after"
 
                 ## normalization has to be called <pdfname>_norm or combine won't find it
                 norm = self.buildRooVar("%s_norm" %  (pdf.GetName()), [], importToWs=False ) 
@@ -2016,7 +2061,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
             else:
                 ipdfs = ROOT.RooArgList()
                 
-                paramVec = ROOT.TVectorD(2)	
+                paramVec = ROOT.TVectorD(2)  
                 for imass,ipdf in [ (lomass,pdfLow), (himass,pdfHigh) ]:
                     print imass, ipdf
                     MH.setVal(imass)
@@ -2132,26 +2177,30 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
             rescaleFunc = ROOT.TF1("rescale","1")
 
         for coup,pdfs in options.parametric_signal_source["pdfs"].iteritems():
-            print coup, options.only_coups
+            print "LC WTF DEBUG A coup, omlu coups =" , coup, options.only_coups
             if len(options.only_coups) > 0 and not coup in options.only_coups: continue
             self.morph_ = {}
             for mass in masses:
+                print "LC WTF DEBUG B mass ", mass
                 ## print mass
                 missing = False
                 for cat,name in pdfs.iteritems():
+                    print "LC WTF DEBUG C cat, name =", cat,name, " categories ", categories , " cat in categories ? ", (cat in categories)
                     if not cat in categories: continue
                     if mass: name = name % mass
+                    print "LC WTF DEBUG D pdf is called ", name 
                     pdf = workspace.pdf(name)
                     if not pdf: missing = True
+                    print "LC WTF DEBUG E missing? ", missing
                     
                 if missing: 
                     if mass < options.parametric_signal_source.get("interpolate_below",1e+6):
                         if not self.tryInterpolate(coup,mass,masses,pdfs,workspace,MH,
                                                    workspace.var(options.parametric_signal_source.get("obs","mgg"))):
-                            print "missing %s %s" % ( coup, str(mass) )
+                            print "missing a %s %s" % ( coup, str(mass) )
                             continue
                     else:
-                        print "missing %s %s" % ( coup, str(mass) )
+                        print "missing b %s %s" % ( coup, str(mass) )
                         continue
                 
                 self.bookNewWs()
@@ -2387,7 +2436,9 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         print "done"        
         ## pdf.Print()
         ## dset.Print()
+        print " LC DEBUG 0"        
         hist   = frame.getObject(int(frame.numItems()-2))
+        print " LC DEBUG 1"        
         if poissonErrs:
             alpha = (1. - 0.6827)*0.5
             for ip in range(hist.GetN()):
@@ -2397,8 +2448,11 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                 hist.SetPointEYlow(ip,el)
                 hist.SetPointEYhigh(ip,eu)
 
+        print " LC DEBUG 2"        
         fitc   = frame.getObject(int(frame.numItems()-1))
+        print " LC DEBUG 3"        
         fitcLeg,histLeg = fitc,hist
+        print " LC DEBUG 4"        
         ## print hist, fitc
         if extra:
             extra.plotOn(frame,RooFit.LineColor(ROOT.kGreen))
@@ -2455,18 +2509,27 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
             resid.addObject(ronesigma,"E2")
             print "done"
         # one = ROOT.TLine(resid.GetXaxis().GetXmin(),0,resid.GetXaxis().GetXmax(),0)
+        print " LC DEBUG 5"        
         one = ROOT.TLine(rngmin,0,rngmax,0)
         ## one.Print()
+        print " LC DEBUG 6"        
         one.SetLineColor(ROOT.kBlue), one.SetLineWidth(2)
+        print " LC DEBUG 7"        
         resid.addObject(one)
+        print " LC DEBUG 8"        
         self.keep(one)
+        print " LC DEBUG 9"        
         hresid = frame.residHist(hist.GetName(),fitc.GetName(),True)
+        print " LC DEBUG 10"        
         resid.addPlotable(hresid,"PE")
+        print " LC DEBUG 11"        
         
+        print " LC DEBUG 12"        
         if signalmodel:
             signalmodel.plotOn(frame,RooFit.Normalization(signalmodel_norm.getVal(),ROOT.RooAbsReal.NumEvent),RooFit.LineColor(ROOT.kRed+1))
             signalmodel = frame.getObject(int(frame.numItems()-1))
             
+        print " LC DEBUG 13"        
         if sig: 
             canv = ROOT.TCanvas("sig_fit_%s" % label, "sig_fit_%s" % label)
             legend = None
@@ -2482,18 +2545,25 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
                 ## legend = ROOT.TLegend(0.4,0.35,0.9,0.9)
                 
         canv.SetLeftMargin(0.2)
+        print " LC DEBUG 14"        
         canv.Divide(1,2)
+        print " LC DEBUG 15"        
                 
         canv.SetLeftMargin(0.12),canv.SetRightMargin(0.025),canv.SetTopMargin(0.085),canv.SetBottomMargin(0.12)
+        print " LC DEBUG 16"        
         canv.cd(1)
+        print " LC DEBUG 17"        
         ROOT.gPad.SetPad(0.,0.38,1.,0.95)
+        print " LC DEBUG 18"        
         ROOT.gPad.SetLeftMargin(0.12),ROOT.gPad.SetRightMargin(0.025),ROOT.gPad.SetTopMargin(0.0015),ROOT.gPad.SetBottomMargin(0.02)
+        print " LC DEBUG 19"        
         ROOT.gPad.SetLogy(logy)
         ROOT.gPad.SetLogx(logx)
         ROOT.gPad.SetFillStyle(0)
         ROOT.gPad.SetTickx()
         # ROOT.gPad.SetTicky()
         
+        print " LC DEBUG 20"        
         canv.cd(2)        
         ROOT.gPad.SetPad(0.,0.,1.,0.38)
         ROOT.gPad.SetFillStyle(0)
@@ -2503,6 +2573,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         # ROOT.gPad.SetTicky()
 
         canv.cd(1)
+        print " LC DEBUG 21"        
         if sig:
             ymin = fitc.GetMinimum()
             ymax = fitc.GetMaximum()
@@ -2521,6 +2592,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         ### frame.GetXaxis().SetRangeUser(200,2000)
         ### resid.GetXaxis().SetLimits(200,2000)
         ### resid.GetXaxis().SetRangeUser(200,2000)
+        print " LC DEBUG 22"        
         frame.GetXaxis().SetLabelSize( 1.2*frame.GetXaxis().GetLabelSize() )
         frame.GetXaxis().SetTitleSize( 1.2*frame.GetXaxis().GetTitleSize() )
         frame.GetXaxis().SetTitleOffset( 1.15 )
@@ -2529,6 +2601,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         frame.GetYaxis().SetLabelSize( frame.GetXaxis().GetLabelSize() * canv.GetWh() / ROOT.gPad.GetWh() * 1.1 )
         frame.GetYaxis().SetTitleSize( frame.GetXaxis().GetTitleSize() * canv.GetWh() / ROOT.gPad.GetWh() * 1.1 )
         frame.GetYaxis().SetTitleOffset( 0.6 )
+        print " LC DEBUG 23"        
         if not logy:
             frame.GetYaxis().SetNdivisions(505)
         frame.Draw()
@@ -2556,6 +2629,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         pt.Draw("same")
         self.keep(pt)
         
+        print " LC DEBUG 24"        
         if not logy:
             zero = ROOT.TLine(frame.GetXaxis().GetXmin(),0,frame.GetXaxis().GetXmax(),0)
             zero.SetLineColor(ROOT.kBlack)
@@ -2563,6 +2637,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
             zero.Draw("same")
             self.keep(zero)
 
+        print " LC DEBUG 24a"        
         canv.cd(2)
         ROOT.gPad.SetGridy()
         ROOT.gPad.SetLogx(logx)
@@ -2573,6 +2648,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         resid.GetYaxis().SetTitleSize( frame.GetYaxis().GetTitleSize() * 6.5/3.5 )
         resid.GetYaxis().SetTitleOffset( frame.GetYaxis().GetTitleOffset() * 3.5/6.5 ) # not clear why the ratio should be upside down, but it does
         resid.GetYaxis().SetLabelSize( frame.GetYaxis().GetLabelSize() * 6.5/3.5 )
+        print " LC DEBUG 24b"        
         resid.GetXaxis().SetTitleSize( frame.GetXaxis().GetTitleSize() * 6.5/3.5 )
         resid.GetXaxis().SetTitleOffset( frame.GetXaxis().GetTitleOffset() )
         resid.GetXaxis().SetLabelSize( frame.GetXaxis().GetLabelSize() * 6.5/3.5 )
@@ -2587,6 +2663,7 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         ROOT.gPad.SetTopMargin(0.1*margin)
         ROOT.gPad.SetBottomMargin(0.1*margin)
 
+        print " LC DEBUG 24c"        
         canv.cd(2)
         margin = ROOT.gPad.GetBottomMargin()+ROOT.gPad.GetTopMargin()
         ROOT.gPad.SetBottomMargin(margin)
@@ -2595,12 +2672,19 @@ kmax * number of nuisance parameters (source of systematic uncertainties)
         frame.GetXaxis().SetTitle("")
         frame.GetXaxis().SetLabelSize(0.)
                 
+        print " LC DEBUG 24d"        
         print 
+        print " LC DEBUG 24da"        
         # this will actually save the plots
+        print " LC DEBUG 24db"        
         self.keep(canv)
+        print " LC DEBUG 24dc"        
         self.format(canv,self.options.postproc)
+        print " LC DEBUG 24dd"        
         self.autosave(True)
+        print " LC DEBUG 24de"        
         print
+        print " LC DEBUG 25"        
         
 
     ## ------------------------------------------------------------------------------------------------------------

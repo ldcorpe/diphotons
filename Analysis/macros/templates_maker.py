@@ -154,6 +154,8 @@ class TemplatesApp(PlotApp):
                                     default=None,help="default: %default"),
                         make_option("--prepare-data",dest="prep_data",action="store_true",
                                     default=False,help="prepare templates only with data, no mc, signals, or templatesMC,mctruth)"),
+                        make_option("--prepare-signal",dest="prep_signal",action="store_true",
+                                    default=False,help="generate signal trees (overrides --prepare-nosignal)"),
                         make_option("--prepare-nosignal",dest="prep_nosig",action="store_true",
                                     default=False,help="prepare templates without signals"),
                         make_option("--mix-mc",dest="mix_mc",action="store_true",
@@ -464,7 +466,7 @@ class TemplatesApp(PlotApp):
             self.datasets_["mc"]   = self.openDataset(None,options.mc_file,options.infile,options.mc)
             self.datasets_["templatesMC"]   = self.openDataset(None,options.mc_file,options.infile,options.templatesMC)
        
-        if not (options.prep_data or options.prep_nosig):
+        if not (options.prep_data or options.prep_nosig) or options.prep_signal:
             for name,trees in options.signals.iteritems():
                 self.datasets_[name] = self.openDataset(None,options.mc_file,options.infile,trees)        
             # used by parent class PlotApp to read in objects
@@ -506,7 +508,7 @@ class TemplatesApp(PlotApp):
             categories      = fit["categories"]
             if not options.prep_data:
                 truth_selection = fit["truth_selection"]
-                if not options.prep_nosig:
+            if not (options.prep_data or options.prep_nosig) or options.prep_signal:
                     signals         = fit.get("signals",[])
                     if signals == "__all__":
                         signals = options.signals.keys()
@@ -534,7 +536,7 @@ class TemplatesApp(PlotApp):
             print "Number of dimensions : %d" % ndim
             print "Components           : %s" % ",".join(components)
             print 
-            
+            print "DEBUG tmp ",tmp 
             tmp.cd()
             
             ## prepare data
@@ -551,7 +553,7 @@ class TemplatesApp(PlotApp):
                 self.buildRooDataSet(mcTrees,"mc",name,fit,categories,fulllist,weight,preselection,storeTrees)
           
           ## prepare signal
-            if not (options.prep_data or options.prep_nosig):
+            if not (options.prep_data or options.prep_nosig) or options.prep_signal:
                 for sig in signals:
                     sigTrees =  self.prepareTrees(sig,selection,options.verbose,"Signal %s trees" % sig)
                     self.buildRooDataSet(sigTrees,sig,name,fit,categories,fulllist,weight,preselection,storeTrees)

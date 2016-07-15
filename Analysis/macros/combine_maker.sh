@@ -4,9 +4,8 @@
 version=$1 && shift
 
 fitname=2D 
-www=~/www/exo/spring15_7415
-if [[ $(whoami) == "mquittna" ]]; then
-    www=/afs/cern.ch/user/m/mquittna/www/diphoton/
+if [[ $(whoami) == "lcorpe" ]]; then
+    www=/afs/cern.ch/user/l/lcorpe/www/diphoton/
 fi
 
 shapes="default_shapes"
@@ -15,6 +14,7 @@ default_model=""
 opts=""
 input_opts=""
 data_version=""
+prepare=""
 while [[ -n $1 ]]; do
     case $1 in
 	--fit-name)
@@ -28,6 +28,9 @@ while [[ -n $1 ]]; do
 	--verbose)
 	    verbose="--verbose"
 	    opts="$opts --verbose"
+	    ;;
+	--prepare-*)
+	    prepare="$prepare $1"
 	    ;;
 	--redo-input)
 	    rerun="1"
@@ -126,8 +129,9 @@ label="$shapes"
 
 input=${version}_${fitname}_final_ws.root
 input_log=${version}_${fitname}_final_ws.log
-##treesdir=/afs/cern.ch/user/m/musella/public/workspace/exo
-treesdir=
+treesdir=/afs/cern.ch/user/m/musella/public/workspace/exo
+#treesdir=~musella/public/workspace/exo/
+#treesdir=
 ## ls $treesdir/$ $input_folder
 [[ ! -d $treesdir/$input_folder ]] && treesdir=$PWD
 ##workdir=${version}_${fitname}_${label}_lumi_${lumi}
@@ -141,7 +145,7 @@ fi
 
 mkdir $workdir
 
-##mkdir $www/$version
+mkdir $www/$version
 ##
 set -x
 if [[ -n $rerun  ]] || [[ ! -f $input ]]; then
@@ -153,7 +157,8 @@ if [[ -n $rerun  ]] || [[ ! -f $input ]]; then
         subset="2D,singlePho"
         mix="--mix-templates"
     fi
-    ./templates_maker.py --load templates_maker.json,templates_maker_prepare.json --only-subset $subset $mix --input-dir $treesdir/$input_folder -o $input $verbose $input_opts 2>&1 | tee $input_log
+    #./templates_maker.py --load templates_maker.json,templates_maker_prepare.json --only-subset $subset $mix --input-dir $treesdir/$input_folder -o $input $verbose $input_opts 2>&1 | tee $input_log
+    ./templates_maker.py --load templates_maker.json,templates_maker_prepare.json --only-subset $subset $mix --input-dir $treesdir/$input_folder $prepare -o $input $verbose $input_opts 
    echo "**************************************************************************************************************************"
 elif [[ -n $mix ]]; then
    echo "**************************************************************************************************************************"
@@ -176,12 +181,16 @@ if [[ -z $just_fit_bkg ]]; then
 	--generate-datacard \
 	--read-ws $input \
 	--ws-dir $workdir \
+	-O $www/$version/$workdir \
 	-o $workdir.root  \
 	--cardname datacard_${workdir}.txt $opts 2>&1 | tee $workdir/combine_maker${log_label}.log
 else
     ./combine_maker.py \
 	--fit-name $fitname  --luminosity $lumi  --lumi $lumi \
 	--read-ws $input \
+	--ws-dir $workdir \
+	-O $www/$version/$workdir \
+	-o $workdir.root  \
 	$opts 2>&1 | tee $workdir/combine_maker_bkg_only${log_label}.log
     
 fi
